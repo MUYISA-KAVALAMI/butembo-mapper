@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Butembo Mapper - Localisation en temps réel</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        .navbar-osm {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 8px 16px;
+        }
+        .navbar-osm .brand { font-size: 16px; font-weight: 600; color: #2c3e50; text-decoration: none; }
+        
+        .control-panel {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .control-btn {
+            width: 48px;
+            height: 48px;
+            background: white;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            cursor: pointer;
+            font-size: 20px;
+            transition: all 0.2s;
+        }
+        .control-btn:hover { background: #f0f0f0; transform: scale(1.02); }
+        .control-btn.active { background: #4c9aff; color: white; }
+        .control-btn.sharing { background: #22c55e; color: white; animation: pulse-green 2s infinite; }
+        
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        
+        .search-container {
+            position: absolute;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            width: 90%;
+            max-width: 350px;
+        }
+        .search-box {
+            background: white;
+            border-radius: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .search-box input { flex: 1; border: none; outline: none; font-size: 14px; }
+        .search-box button { background: none; border: none; color: #4c9aff; cursor: pointer; }
+        
+        /* Panels */
+        .floating-panel {
+            position: absolute;
+            bottom: 80px;
+            right: 20px;
+            z-index: 1000;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            padding: 15px;
+            width: 280px;
+            display: none;
+        }
+        .floating-panel.active { display: block; }
+        
+        .share-code {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 18px;
+            text-align: center;
+            letter-spacing: 2px;
+            margin: 10px 0;
+        }
+        
+        .people-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .person-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .person-item:hover { background: #f5f5f5; }
+        .person-online { color: #22c55e; }
+        .person-offline { color: #999; }
+        
+        .custom-marker { background: transparent; border: none; }
+        .marker-container { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+        .marker-icon {
+            background: white;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            border: 2px solid;
+            font-size: 16px;
+        }
+        .marker-label {
+            background: rgba(0,0,0,0.7);
+            color: white;
+            font-size: 9px;
+            padding: 2px 5px;
+            border-radius: 4px;
+            margin-top: 2px;
+            white-space: nowrap;
+        }
+        
+        .user-location-marker {
+            width: 16px;
+            height: 16px;
+            background: #4c9aff;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px #4c9aff;
+            animation: pulse 1.5s ease-out infinite;
+        }
+        .other-user-marker { font-size: 28px; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.3)); }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(76, 154, 255, 0.7); }
+            70% { box-shadow: 0 0 0 12px rgba(76, 154, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 154, 255, 0); }
+        }
+        
+        #alertContainer {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 2000;
+            max-width: 280px;
+        }
+        .alert-custom {
+            background: #2c3e50;
+            color: white;
+            border-radius: 8px;
+            padding: 10px 16px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            animation: slideInLeft 0.25s ease-out;
+        }
+        @keyframes slideInLeft {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @media (max-width: 768px) {
+            .control-btn { width: 44px; height: 44px; font-size: 18px; }
+            .floating-panel { width: 260px; right: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar-osm">
+        <div class="d-flex justify-content-between align-items-center">
+            <a href="#" class="brand"><i class="fas fa-map-marked-alt"></i> Butembo Mapper</a>
+            <div id="userNav"></div>
+        </div>
+    </nav>
+    
+    <div class="search-container">
+        <div class="search-box">
+            <i class="fas fa-search" style="color: #999;"></i>
+            <input type="text" id="searchInput" placeholder="Rechercher un lieu..." autocomplete="off">
+            <button onclick="searchLocation()"><i class="fas fa-arrow-right"></i></button>
+        </div>
+        <div id="searchResults" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 12px; margin-top: 5px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: none; z-index: 1001;"></div>
+    </div>
+    
+    <div class="control-panel">
+        <button class="control-btn" onclick="zoomIn()">+</button>
+        <button class="control-btn" onclick="zoomOut()">−</button>
+        <button class="control-btn" id="locationBtn" onclick="toggleLocation()">📍</button>
+        <button class="control-btn" id="shareBtn" onclick="toggleSharePanel()" style="background:#8b5cf6;color:white;">🔗</button>
+        <button class="control-btn" id="peopleBtn" onclick="togglePeoplePanel()" style="background:#ec489a;color:white;">👥</button>
+        <button class="control-btn" onclick="openAddModal()" style="background:#22c55e;color:white;">+</button>
+    </div>
+    
+    <!-- Panneau de partage -->
+    <div class="floating-panel" id="sharePanel">
+        <h6><i class="fas fa-share-alt"></i> Partager ma position</h6>
+        <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="sharingToggle" onchange="toggleSharing()">
+            <label class="form-check-label" id="sharingLabel">Partage désactivé</label>
+        </div>
+        <div id="shareCodeSection" style="display:none;">
+            <p class="small text-muted mb-1">Votre code unique (valable 1h):</p>
+            <div class="share-code" id="shareCode"></div>
+            <div id="qrcode" style="display: flex; justify-content: center; margin: 10px 0;"></div>
+            <button class="btn btn-sm btn-secondary w-100" onclick="copyShareCode()">Copier le code</button>
+        </div>
+    </div>
+    
+    <!-- Panneau des personnes -->
+    <div class="floating-panel" id="peoplePanel">
+        <h6><i class="fas fa-users"></i> Personnes à proximité</h6>
+        <div class="mb-2">
+            <input type="text" id="searchPersonInput" class="form-control form-control-sm" placeholder="Code ou nom...">
+            <button class="btn btn-sm btn-primary w-100 mt-1" onclick="addPersonByCode()">Ajouter par code</button>
+        </div>
+        <div id="peopleList" class="people-list">
+            <div class="text-muted text-center small">Chargement...</div>
+        </div>
+    </div>
+    
+    <div id="map"></div>
+    <div id="alertContainer"></div>
+    
+    <!-- Modal Ajout lieu -->
+    <div class="modal fade" id="addModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="fas fa-plus-circle"></i> Ajouter un lieu</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addForm">
+                        <div class="mb-2">
+                            <label class="form-label small">Nom du lieu *</label>
+                            <input type="text" id="nom" class="form-control" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Catégorie *</label>
+                            <select id="categorie" class="form-select" required>
+                                <option value="">Sélectionner...</option>
+                                <option value="ecole">🏫 École</option>
+                                <option value="hopital">🏥 Hôpital</option>
+                                <option value="marche">🛒 Marché</option>
+                                <option value="eglise">⛪ Église</option>
+                                <option value="administration">🏢 Administration</option>
+                                <option value="restaurant">🍽️ Restaurant</option>
+                                <option value="hotel">🏨 Hôtel</option>
+                                <option value="residentiel">🏠 Résidentiel</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Adresse</label>
+                            <input type="text" id="adresse" class="form-control">
+                        </div>
+                        <div class="alert alert-info small py-1 mb-2">
+                            <i class="fas fa-info-circle"></i> Cliquez sur la carte pour placer le marqueur
+                        </div>
+                        <div class="row">
+                            <div class="col-6"><input type="text" id="latitude" class="form-control" placeholder="Latitude" readonly></div>
+                            <div class="col-6"><input type="text" id="longitude" class="form-control" placeholder="Longitude" readonly></div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button class="btn btn-primary" onclick="submitPoint()">Enregistrer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Configuration
+        let map, markers = {}, currentUser = null;
+        let watchId = null, currentPositionMarker = null;
+        let isSharing = false, locationUpdateInterval = null;
+        let otherUsersMarkers = {};
+        let activeUsers = [];
+        let shareCode = null;
+        
+        const BUTEMBO = [0.1211, 29.2883];
+        
+        const icons = {
+            ecole: { emoji: '🏫', color: '#22c55e' },
+            hopital: { emoji: '🏥', color: '#ef4444' },
+            marche: { emoji: '🛒', color: '#f59e0b' },
+            eglise: { emoji: '⛪', color: '#8b5cf6' },
+            administration: { emoji: '🏢', color: '#3b82f6' },
+            restaurant: { emoji: '🍽️', color: '#ec489a' },
+            hotel: { emoji: '🏨', color: '#14b8a6' },
+            residentiel: { emoji: '🏠', color: '#a855f7' },
+            default: { emoji: '📍', color: '#64748b' }
+        };
+        
+        const modeIcons = { person: '🚶', car: '🚗', motorcycle: '🏍️' };
+        
+        // Initialisation
+        function initMap() {
+            map = L.map('map').setView(BUTEMBO, 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 19
+            }).addTo(map);
+            map.on('click', onMapClick);
+            loadPoints();
+            loadActiveUsers();
+            setInterval(loadActiveUsers, 5000);
+        }
+        
+        function createMarkerFromPoint(point) {
+            const iconData = icons[point.categorie] || icons.default;
+            const html = `<div class="marker-container"><div class="marker-icon" style="border-color: ${iconData.color};">${iconData.emoji}</div><div class="marker-label">${point.nom.length > 12 ? point.nom.substring(0, 10) + '…' : point.nom}</div></div>`;
+            const customIcon = L.divIcon({ html: html, className: 'custom-marker', iconSize: [32, 45], popupAnchor: [0, -18] });
+            const marker = L.marker([point.latitude, point.longitude], { icon: customIcon });
+            marker.bindPopup(`<strong>${point.nom}</strong><br>${point.adresse || ''}<br><button class="btn btn-sm btn-primary mt-2" onclick="showDirections(${point.latitude}, ${point.longitude})">Itinéraire</button>`);
+            return marker;
+        }
+        
+        async function loadPoints() {
+            try {
+                const response = await fetch('/api/points');
+                const points = await response.json();
+                Object.values(markers).forEach(m => { if(m && map) map.removeLayer(m); });
+                markers = {};
+                points.forEach(point => {
+                    const marker = createMarkerFromPoint(point);
+                    marker.addTo(map);
+                    markers[point.id] = marker;
+                });
+            } catch(e) { console.error(e); }
+        }
+        
+        // Localisation
+        function toggleLocation() {
+            if (!currentUser) { showAlert('Connectez-vous d\'abord', 'warning'); return; }
+            if (watchId) {
+                stopLocationTracking();
+            } else {
+                startLocationTracking();
+            }
+        }
+        
+        function startLocationTracking() {
+            if (!navigator.geolocation) { showAlert('Géolocalisation non supportée', 'danger'); return; }
+            
+            watchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    
+                    if (currentPositionMarker) {
+                        currentPositionMarker.setLatLng([lat, lng]);
+                    } else {
+                        const userIcon = L.divIcon({ html: '<div class="user-location-marker"></div>', className: 'user-marker', iconSize: [16, 16], iconAnchor: [8, 8] });
+                        currentPositionMarker = L.marker([lat, lng], { icon: userIcon }).bindPopup('Vous êtes ici').addTo(map);
+                    }
+                    map.setView([lat, lng], 16);
+                    
+                    if (isSharing) {
+                        updateServerLocation(lat, lng, position.coords.speed || 0, position.coords.altitude || 0, position.coords.accuracy || 0);
+                    }
+                },
+                (error) => { showAlert('Erreur GPS: ' + error.message, 'warning'); },
+                { enableHighAccuracy: true, maximumAge: 0 }
+            );
+            
+            document.getElementById('locationBtn').style.background = '#ff4444';
+            document.getElementById('locationBtn').style.color = 'white';
+            showAlert('📍 Localisation activée', 'success');
+        }
+        
+        function stopLocationTracking() {
+            if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+            if (currentPositionMarker) { map.removeLayer(currentPositionMarker); currentPositionMarker = null; }
+            if (isSharing) { toggleSharing(); }
+            
+            document.getElementById('locationBtn').style.background = 'white';
+            document.getElementById('locationBtn').style.color = '#2c3e50';
+            showAlert('Localisation désactivée', 'info');
+        }
+        
+        async function updateServerLocation(lat, lng, speed, altitude, accuracy) {
+            try {
+                await fetch('/api/update-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        latitude: lat,
+                        longitude: lng,
+                        mode: 'person',
+                        speed: speed,
+                        altitude: altitude,
+                        accuracy: accuracy,
+                        is_sharing: isSharing ? 1 : 0
+                    })
+                });
+            } catch(e) { console.error('Erreur mise à jour position', e); }
+        }
+        
+        // Partage
+        function toggleSharing() {
+            const toggle = document.getElementById('sharingToggle');
+            const label = document.getElementById('sharingLabel');
+            
+            if (!currentUser) { showAlert('Connectez-vous d\'abord', 'warning'); toggle.checked = false; return; }
+            if (!watchId) { showAlert('Activez d\'abord votre localisation', 'warning'); toggle.checked = false; return; }
+            
+            isSharing = toggle.checked;
+            
+            if (isSharing) {
+                label.innerHTML = 'Partage activé ✅';
+                label.style.color = '#22c55e';
+                generateShareCode();
+                document.getElementById('shareCodeSection').style.display = 'block';
+                document.getElementById('shareBtn').classList.add('sharing');
+                showAlert('Votre position est maintenant partagée !', 'success');
+            } else {
+                label.innerHTML = 'Partage désactivé ❌';
+                label.style.color = '#ef4444';
+                document.getElementById('shareCodeSection').style.display = 'none';
+                document.getElementById('shareBtn').classList.remove('sharing');
+                fetch('/api/stop-sharing', { method: 'POST' });
+                showAlert('Partage désactivé', 'info');
+            }
+        }
+        
+        async function generateShareCode() {
+            const response = await fetch('/api/generate-share-code', { method: 'POST' });
+            const data = await response.json();
+            shareCode = data.code;
+            document.getElementById('shareCode').innerHTML = shareCode;
+            
+            // Générer QR Code
+            document.getElementById('qrcode').innerHTML = '';
+            new QRCode(document.getElementById('qrcode'), {
+                text: shareCode,
+                width: 100,
+                height: 100
+            });
+        }
+        
+        function copyShareCode() {
+            navigator.clipboard.writeText(shareCode);
+            showAlert('Code copié !', 'success');
+        }
+        
+        // Localiser d'autres personnes
+        async function loadActiveUsers() {
+            try {
+                const response = await fetch('/api/active-users');
+                const users = await response.json();
+                activeUsers = users;
+                updateUsersOnMap();
+                updatePeopleList();
+            } catch(e) { console.error(e); }
+        }
+        
+        function updateUsersOnMap() {
+            Object.values(otherUsersMarkers).forEach(m => { if(m) map.removeLayer(m); });
+            otherUsersMarkers = {};
+            
+            activeUsers.forEach(user => {
+                const iconHtml = modeIcons[user.mode] || '🚶';
+                const customIcon = L.divIcon({
+                    html: `<div style="font-size: 28px; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.3));">${iconHtml}</div>`,
+                    className: 'other-user-marker',
+                    iconSize: [28, 28],
+                    popupAnchor: [0, -14]
+                });
+                
+                const marker = L.marker([user.latitude, user.longitude], { icon: customIcon });
+                const lastUpdate = new Date(user.last_update).toLocaleTimeString();
+                marker.bindPopup(`<strong>${user.username}</strong><br>${iconHtml} Dernière mise à jour: ${lastUpdate}`);
+                marker.addTo(map);
+                otherUsersMarkers[user.id] = marker;
+            });
+        }
+        
+        function updatePeopleList() {
+            const container = document.getElementById('peopleList');
+            if (activeUsers.length === 0) {
+                container.innerHTML = '<div class="text-muted text-center small">Aucune personne à proximité</div>';
+                return;
+            }
+            
+            container.innerHTML = activeUsers.map(user => `
+                <div class="person-item" onclick="centerOnUser(${user.id}, ${user.latitude}, ${user.longitude})">
+                    <div style="font-size: 24px;">${modeIcons[user.mode] || '🚶'}</div>
+                    <div class="flex-grow-1">
+                        <strong>${user.username}</strong>
+                        <div class="small person-online">🟢 En ligne</div>
+                    </div>
+                    <div class="small text-muted">${new Date(user.last_update).toLocaleTimeString()}</div>
+                </div>
+            `).join('');
+        }
+        
+        async function addPersonByCode() {
+            const code = document.getElementById('searchPersonInput').value.trim();
+            if (!code) { showAlert('Entrez un code', 'warning'); return; }
+            
+            try {
+                const response = await fetch(`/api/share-code-location/${code}`);
+                if (response.ok) {
+                    const user = await response.json();
+                    showAlert(`${user.username} ajouté(e) !`, 'success');
+                    centerOnUser(user.user_id, user.latitude, user.longitude);
+                    document.getElementById('searchPersonInput').value = '';
+                    loadActiveUsers();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error, 'danger');
+                }
+            } catch(e) { showAlert('Erreur', 'danger'); }
+        }
+        
+        function centerOnUser(userId, lat, lng) {
+            map.setView([lat, lng], 16);
+            if (otherUsersMarkers[userId]) {
+                otherUsersMarkers[userId].openPopup();
+            }
+        }
+        
+        // Utilitaires
+        function showDirections(lat, lng) {
+            if (currentPositionMarker) {
+                const start = currentPositionMarker.getLatLng();
+                const route = L.polyline([start, [lat, lng]], { color: '#ff4444', weight: 3, dashArray: '8,8' }).addTo(map);
+                map.fitBounds([start, [lat, lng]]);
+                setTimeout(() => route.remove(), 8000);
+            } else {
+                map.setView([lat, lng], 16);
+            }
+        }
+        
+        function onMapClick(e) {
+            if (currentUser) {
+                if (window.tempMarker) map.removeLayer(window.tempMarker);
+                window.tempMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+                document.getElementById('latitude').value = e.latlng.lat.toFixed(6);
+                document.getElementById('longitude').value = e.latlng.lng.toFixed(6);
+            }
+        }
+        
+        async function submitPoint() {
+            if (!currentUser) return;
+            const data = {
+                nom: document.getElementById('nom').value,
+                categorie: document.getElementById('categorie').value,
+                latitude: parseFloat(document.getElementById('latitude').value),
+                longitude: parseFloat(document.getElementById('longitude').value),
+                adresse: document.getElementById('adresse').value,
+                telephone: document.getElementById('telephone').value,
+                description: document.getElementById('description').value
+            };
+            if (!data.nom || !data.categorie || !data.latitude || !data.longitude) { showAlert('Champs obligatoires', 'warning'); return; }
+            try {
+                const response = await fetch('/api/points', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                if (response.ok) {
+                    showAlert('Lieu ajouté!', 'success');
+                    document.getElementById('addForm').reset();
+                    if (window.tempMarker) map.removeLayer(window.tempMarker);
+                    bootstrap.Modal.getInstance(document.getElementById('addModal'))?.hide();
+                    loadPoints();
+                }
+            } catch(e) { showAlert('Erreur', 'danger'); }
+        }
+        
+        async function searchLocation() {
+            const query = document.getElementById('searchInput').value;
+            if (!query) return;
+            try {
+                const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Butembo')}&limit=4`);
+                const results = await resp.json();
+                const div = document.getElementById('searchResults');
+                if (results.length) {
+                    div.innerHTML = results.map(r => `<div style="padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;" onclick="goToLocation(${r.lat}, ${r.lon}, '${r.display_name.replace(/'/g, "\\'")}')"><strong>${r.display_name.split(',')[0]}</strong><br><small>${r.display_name}</small></div>`).join('');
+                    div.style.display = 'block';
+                } else { div.style.display = 'none'; showAlert('Aucun résultat', 'warning'); }
+            } catch(e) { console.error(e); }
+        }
+        
+        function goToLocation(lat, lng, name) {
+            map.setView([lat, lng], 16);
+            document.getElementById('searchResults').style.display = 'none';
+            if (window.tempSearchMarker) map.removeLayer(window.tempSearchMarker);
+            window.tempSearchMarker = L.marker([lat, lng]).bindPopup(name.split(',')[0]).openPopup();
+        }
+        
+        function toggleSharePanel() {
+            document.getElementById('sharePanel').classList.toggle('active');
+            document.getElementById('peoplePanel').classList.remove('active');
+        }
+        
+        function togglePeoplePanel() {
+            document.getElementById('peoplePanel').classList.toggle('active');
+            document.getElementById('sharePanel').classList.remove('active');
+        }
+        
+        function zoomIn() { map.zoomIn(); }
+        function zoomOut() { map.zoomOut(); }
+        
+        // Utilisateur
+        function getCurrentUser() { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; }
+        
+        function updateNav() {
+            currentUser = getCurrentUser();
+            const nav = document.getElementById('userNav');
+            if (currentUser) {
+                nav.innerHTML = `<div class="dropdown"><button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="fas fa-user-circle"></i> ${currentUser.username}</button><ul class="dropdown-menu dropdown-menu-end">${currentUser.role === 'admin' ? '<li><a class="dropdown-item" href="/admin">Admin</a></li><li><hr></li>' : ''}<li><a class="dropdown-item" href="#" onclick="logout()">Déconnexion</a></li></ul></div>`;
+            } else { nav.innerHTML = `<a href="/login" class="btn btn-sm btn-primary">Connexion</a>`; }
+        }
+        
+        async function logout() {
+            if (watchId) stopLocationTracking();
+            await fetch('/api/logout', { method: 'POST' });
+            localStorage.removeItem('user');
+            updateNav();
+            showAlert('Déconnecté', 'info');
+            location.reload();
+        }
+        
+        function openAddModal() { if (!currentUser) { window.location.href = '/login'; return; } new bootstrap.Modal(document.getElementById('addModal')).show(); }
+        function showAlert(msg, type) { const c = document.getElementById('alertContainer'); if (!c) return; const a = document.createElement('div'); a.className = `alert-custom alert-${type}`; a.innerHTML = msg; c.appendChild(a); setTimeout(() => a.remove(), 3000); }
+        
+        document.addEventListener('click', e => { if (!e.target.closest('.search-container')) document.getElementById('searchResults').style.display = 'none'; });
+        
+        updateNav();
+        initMap();
+        
+        window.submitPoint = submitPoint; window.logout = logout; window.openAddModal = openAddModal;
+        window.searchLocation = searchLocation; window.goToLocation = goToLocation;
+        window.zoomIn = zoomIn; window.zoomOut = zoomOut; window.showDirections = showDirections;
+        window.toggleLocation = toggleLocation; window.toggleSharePanel = toggleSharePanel;
+        window.togglePeoplePanel = togglePeoplePanel; window.toggleSharing = toggleSharing;
+        window.addPersonByCode = addPersonByCode; window.centerOnUser = centerOnUser;
+        window.copyShareCode = copyShareCode;
+    </script>
+</body>
+</html>
