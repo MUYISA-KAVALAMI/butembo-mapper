@@ -6,13 +6,22 @@ import json
 import random
 import string
 from datetime import datetime, timedelta
+import os
 
 app = Flask(__name__)
-app.secret_key = 'butembo_mapper_secret_key_2024'
+app.secret_key = os.environ.get('SECRET_KEY', 'butembo_mapper_secret_key_2024')
+app.config['SESSION_TYPE'] = 'filesystem'
 
-# ============ INITIALISATION BASE DE DONNÉES ============
+# ============ BASE DE DONNÉES (sur Render = fichier) ============
+DATABASE = 'butembo.db'
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def init_db():
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
     # Table des utilisateurs
@@ -27,7 +36,7 @@ def init_db():
         )
     ''')
     
-    # Table des lieux (points d'intérêt)
+    # Table des lieux
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS points (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +55,7 @@ def init_db():
         )
     ''')
     
-    # Table pour les positions en temps réel
+    # Table pour les positions
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_locations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +86,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✅ Base de données initialisée avec toutes les tables")
+    print("✅ Base de données initialisée")
 
 # ============ FONCTIONS UTILITAIRES ============
 def hash_password(password):
@@ -118,8 +127,7 @@ def admin_page():
         return redirect(url_for('index'))
     return render_template('admin.html')
 
-# ============ ROUTES AUTHENTIFICATION ============
-
+# ============ ROUTES API ============
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
@@ -130,21 +138,18 @@ def register():
     if not username or not email or not password:
         return jsonify({'error': 'Tous les champs sont requis'}), 400
     
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
-    # Vérifier si l'utilisateur existe
     cursor.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email))
     if cursor.fetchone():
         conn.close()
         return jsonify({'error': 'Nom d\'utilisateur ou email déjà utilisé'}), 400
     
-    # Déterminer le rôle (le premier utilisateur est admin)
     cursor.execute('SELECT COUNT(*) FROM users')
     count = cursor.fetchone()[0]
     role = 'admin' if count == 0 else 'user'
     
-    # Créer l'utilisateur
     hashed_password = hash_password(password)
     cursor.execute(
         'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
@@ -156,12 +161,7 @@ def register():
     
     return jsonify({
         'message': 'Inscription réussie',
-        'user': {
-            'id': user_id,
-            'username': username,
-            'email': email,
-            'role': role
-        }
+        'user': {'id': user_id, 'username': username, 'email': email, 'role': role}
     }), 201
 
 @app.route('/api/login', methods=['POST'])
@@ -173,10 +173,10 @@ def login():
     if not username or not password:
         return jsonify({'error': 'Tous les champs sont requis'}), 400
     
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
-    
     hashed_password = hash_password(password)
+    
     cursor.execute(
         'SELECT id, username, email, role FROM users WHERE (username = ? OR email = ?) AND password = ?',
         (username, username, hashed_password)
@@ -191,12 +191,7 @@ def login():
         
         return jsonify({
             'message': 'Connexion réussie',
-            'user': {
-                'id': user[0],
-                'username': user[1],
-                'email': user[2],
-                'role': user[3]
-            }
+            'user': {'id': user[0], 'username': user[1], 'email': user[2], 'role': user[3]}
         }), 200
     else:
         return jsonify({'error': 'Identifiants invalides'}), 401
@@ -210,18 +205,16 @@ def logout():
 def get_me():
     if 'user_id' not in session:
         return jsonify({'error': 'Non authentifié'}), 401
-    
     return jsonify({
         'id': session['user_id'],
         'username': session['username'],
         'role': session['role']
     }), 200
 
-# ============ ROUTES POINTS D'INTÉRÊT ============
-
+# Points d'intérêt
 @app.route('/api/points', methods=['GET'])
 def get_points():
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -245,7 +238,6 @@ def get_points():
             'website': row[7],
             'description': row[8],
             'user_id': row[9],
-            'status': row[10],
             'created_at': row[11],
             'contributeur': row[12] if len(row) > 12 else None
         })
@@ -270,7 +262,7 @@ def add_point():
     if not all([nom, categorie, latitude, longitude]):
         return jsonify({'error': 'Nom, catégorie et coordonnées sont requis'}), 400
     
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -282,33 +274,9 @@ def add_point():
     conn.commit()
     conn.close()
     
-    return jsonify({
-        'id': point_id,
-        'message': 'Lieu ajouté avec succès'
-    }), 201
+    return jsonify({'id': point_id, 'message': 'Lieu ajouté avec succès'}), 201
 
-@app.route('/api/points/<int:point_id>', methods=['DELETE'])
-@login_required
-def delete_point(point_id):
-    conn = sqlite3.connect('butembo.db')
-    cursor = conn.cursor()
-    
-    # Vérifier si l'utilisateur est admin ou propriétaire
-    if session.get('role') != 'admin':
-        cursor.execute('SELECT user_id FROM points WHERE id = ?', (point_id,))
-        point = cursor.fetchone()
-        if not point or point[0] != session['user_id']:
-            conn.close()
-            return jsonify({'error': 'Non autorisé'}), 403
-    
-    cursor.execute('DELETE FROM points WHERE id = ?', (point_id,))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'message': 'Lieu supprimé'}), 200
-
-# ============ ROUTES LOCALISATION EN TEMPS RÉEL ============
-
+# Localisation
 @app.route('/api/update-location', methods=['POST'])
 @login_required
 def update_location():
@@ -316,72 +284,38 @@ def update_location():
     latitude = data.get('latitude')
     longitude = data.get('longitude')
     mode = data.get('mode', 'person')
-    speed = data.get('speed', 0)
-    altitude = data.get('altitude', 0)
-    accuracy = data.get('accuracy', 0)
     is_sharing = data.get('is_sharing', 1)
     
     if latitude is None or longitude is None:
         return jsonify({'error': 'Coordonnées requises'}), 400
     
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
     cursor.execute('''
         INSERT OR REPLACE INTO user_locations 
-        (user_id, latitude, longitude, speed, altitude, accuracy, mode, is_sharing, last_update)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (session['user_id'], latitude, longitude, speed, altitude, accuracy, mode, is_sharing))
+        (user_id, latitude, longitude, mode, is_sharing, last_update)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (session['user_id'], latitude, longitude, mode, is_sharing))
     
     conn.commit()
     conn.close()
     
     return jsonify({'message': 'Position mise à jour'}), 200
 
-@app.route('/api/get-location/<int:target_user_id>', methods=['GET'])
-@login_required
-def get_location(target_user_id):
-    conn = sqlite3.connect('butembo.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT u.username, ul.latitude, ul.longitude, ul.speed, ul.mode, ul.last_update, ul.is_sharing
-        FROM user_locations ul
-        JOIN users u ON u.id = ul.user_id
-        WHERE ul.user_id = ? AND ul.is_sharing = 1
-    ''', (target_user_id,))
-    
-    location = cursor.fetchone()
-    conn.close()
-    
-    if not location:
-        return jsonify({'error': 'Utilisateur ne partage pas sa position'}), 404
-    
-    return jsonify({
-        'username': location[0],
-        'latitude': location[1],
-        'longitude': location[2],
-        'speed': location[3],
-        'mode': location[4],
-        'last_update': location[5]
-    }), 200
-
 @app.route('/api/active-users', methods=['GET'])
 @login_required
 def get_active_users():
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
-    # Utilisateurs actifs dans les dernières 30 secondes
     threshold = datetime.now() - timedelta(seconds=30)
     
     cursor.execute('''
         SELECT u.id, u.username, ul.latitude, ul.longitude, ul.mode, ul.last_update
         FROM user_locations ul
         JOIN users u ON u.id = ul.user_id
-        WHERE ul.is_sharing = 1 
-        AND ul.last_update > ?
-        AND ul.user_id != ?
+        WHERE ul.is_sharing = 1 AND ul.last_update > ? AND ul.user_id != ?
     ''', (threshold, session['user_id']))
     
     users = []
@@ -401,33 +335,23 @@ def get_active_users():
 @app.route('/api/generate-share-code', methods=['POST'])
 @login_required
 def generate_share_code():
-    # Générer un code unique
     code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
     expires_at = datetime.now() + timedelta(hours=1)
     
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
-    
-    # Supprimer les anciens codes
     cursor.execute('DELETE FROM share_codes WHERE expires_at < ?', (datetime.now(),))
-    
-    cursor.execute('''
-        INSERT INTO share_codes (user_id, code, expires_at)
-        VALUES (?, ?, ?)
-    ''', (session['user_id'], code, expires_at))
-    
+    cursor.execute('INSERT INTO share_codes (user_id, code, expires_at) VALUES (?, ?, ?)',
+                   (session['user_id'], code, expires_at))
     conn.commit()
     conn.close()
     
-    return jsonify({
-        'code': code,
-        'expires_at': expires_at.isoformat()
-    }), 200
+    return jsonify({'code': code, 'expires_at': expires_at.isoformat()}), 200
 
 @app.route('/api/share-code-location/<code>', methods=['GET'])
 @login_required
 def get_share_code_location(code):
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -444,9 +368,6 @@ def get_share_code_location(code):
     if not result:
         return jsonify({'error': 'Code invalide ou expiré'}), 404
     
-    if not result[3] or not result[4]:
-        return jsonify({'error': 'Utilisateur non localisé'}), 404
-    
     return jsonify({
         'user_id': result[0],
         'username': result[1],
@@ -459,23 +380,16 @@ def get_share_code_location(code):
 @app.route('/api/stop-sharing', methods=['POST'])
 @login_required
 def stop_sharing():
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
-    
-    cursor.execute('''
-        UPDATE user_locations SET is_sharing = 0 WHERE user_id = ?
-    ''', (session['user_id'],))
-    
+    cursor.execute('UPDATE user_locations SET is_sharing = 0 WHERE user_id = ?', (session['user_id'],))
     conn.commit()
     conn.close()
-    
     return jsonify({'message': 'Partage désactivé'}), 200
-
-# ============ ROUTES STATISTIQUES ============
 
 @app.route('/api/statistics', methods=['GET'])
 def get_statistics():
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     
     cursor.execute('SELECT COUNT(*) FROM points')
@@ -484,32 +398,14 @@ def get_statistics():
     cursor.execute('SELECT COUNT(*) FROM users')
     total_users = cursor.fetchone()[0]
     
-    # Compter par catégorie
-    cursor.execute('SELECT categorie, COUNT(*) FROM points GROUP BY categorie')
-    categories = {}
-    for row in cursor.fetchall():
-        categories[row[0]] = row[1]
-    
-    # Utilisateurs actifs (localisation)
-    threshold = datetime.now() - timedelta(seconds=30)
-    cursor.execute('SELECT COUNT(*) FROM user_locations WHERE is_sharing = 1 AND last_update > ?', (threshold,))
-    active_users = cursor.fetchone()[0]
-    
     conn.close()
     
-    return jsonify({
-        'total_points': total_points,
-        'total_users': total_users,
-        'active_users': active_users,
-        'categories': categories
-    }), 200
-
-# ============ ROUTES ADMIN ============
+    return jsonify({'total_points': total_points, 'total_users': total_users}), 200
 
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
 def get_users():
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute('SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC')
     
@@ -535,7 +431,7 @@ def update_user_role(user_id):
     if new_role not in ['user', 'admin']:
         return jsonify({'error': 'Rôle invalide'}), 400
     
-    conn = sqlite3.connect('butembo.db')
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute('UPDATE users SET role = ? WHERE id = ?', (new_role, user_id))
     conn.commit()
@@ -543,52 +439,8 @@ def update_user_role(user_id):
     
     return jsonify({'message': 'Rôle mis à jour'}), 200
 
-@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
-@admin_required
-def delete_user(user_id):
-    if user_id == session['user_id']:
-        return jsonify({'error': 'Vous ne pouvez pas vous supprimer vous-même'}), 400
-    
-    conn = sqlite3.connect('butembo.db')
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
-    cursor.execute('DELETE FROM user_locations WHERE user_id = ?', (user_id,))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'message': 'Utilisateur supprimé'}), 200
-
-# ============ LANCEMENT DE L'APPLICATION ============
+# ============ LANCEMENT ============
 if __name__ == '__main__':
     init_db()
-    
-    # Afficher les informations de démarrage
-    print("\n" + "="*60)
-    print("🚀 BUTEMBO MAPPER - APPLICATION COMPLÈTE")
-    print("="*60)
-    print("📋 Fonctionnalités incluses:")
-    print("   ✅ Carte interactive avec OpenStreetMap")
-    print("   ✅ Ajout de points d'intérêt")
-    print("   ✅ Localisation GPS en temps réel")
-    print("   ✅ Partage de position par code QR")
-    print("   ✅ Visualisation des autres utilisateurs")
-    print("   ✅ Recherche de lieux")
-    print("   ✅ Itinéraires")
-    print("   ✅ Interface administrateur")
-    print("")
-    print("📱 Accès depuis l'ordinateur:")
-    print("   → http://localhost:5000")
-    print("   → http://127.0.0.1:5000")
-    print("")
-    print("📱 Accès depuis le téléphone (même WiFi):")
-    print("   → http://VOTRE_IP:5000")
-    print("")
-    print("💡 Pour trouver votre IP:")
-    print("   Windows: ipconfig | findstr IPv4")
-    print("   Mac/Linux: ifconfig | grep inet")
-    print("")
-    print("🔐 Premier compte créé = ADMINISTRATEUR")
-    print("="*60)
-    print("")
-    
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
