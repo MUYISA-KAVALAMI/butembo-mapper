@@ -210,6 +210,7 @@
         <button class="control-btn" onclick="zoomIn()">+</button>
         <button class="control-btn" onclick="zoomOut()">−</button>
         <button class="control-btn" id="locationBtn" onclick="toggleLocation()">📍</button>
+        <button class="control-btn" onclick="toggleSatellite()" style="background:#4c9aff;color:white;">🛰️</button>
         <button class="control-btn" id="shareBtn" onclick="toggleSharePanel()" style="background:#8b5cf6;color:white;">🔗</button>
         <button class="control-btn" id="peopleBtn" onclick="togglePeoplePanel()" style="background:#ec489a;color:white;">👥</button>
         <button class="control-btn" onclick="openAddModal()" style="background:#22c55e;color:white;">+</button>
@@ -322,17 +323,50 @@
         
         const modeIcons = { person: '🚶', car: '🚗', motorcycle: '🏍️' };
         
+        // ============ STYLES DE CARTE (AJOUTÉ POUR SATELLITE) ============
+        const mapStyles = {
+            standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap'
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri'
+            })
+        };
+        let currentTileLayer = null;
+        let isSatellite = false;
+        
         // Initialisation
         function initMap() {
             map = L.map('map').setView(BUTEMBO, 14);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap',
-                maxZoom: 19
-            }).addTo(map);
+            // Initialiser avec le fond standard
+            currentTileLayer = mapStyles.standard;
+            currentTileLayer.addTo(map);
             map.on('click', onMapClick);
             loadPoints();
             loadActiveUsers();
             setInterval(loadActiveUsers, 5000);
+        }
+        
+        // ============ FONCTION SATELLITE ============
+        function toggleSatellite() {
+            if (!currentTileLayer) {
+                currentTileLayer = mapStyles.standard;
+                currentTileLayer.addTo(map);
+            }
+            
+            if (isSatellite) {
+                map.removeLayer(currentTileLayer);
+                currentTileLayer = mapStyles.standard;
+                currentTileLayer.addTo(map);
+                isSatellite = false;
+                showAlert('Vue standard', 'info');
+            } else {
+                map.removeLayer(currentTileLayer);
+                currentTileLayer = mapStyles.satellite;
+                currentTileLayer.addTo(map);
+                isSatellite = true;
+                showAlert('Vue satellite 🛰️', 'success');
+            }
         }
         
         function createMarkerFromPoint(point) {
@@ -663,6 +697,7 @@
         window.togglePeoplePanel = togglePeoplePanel; window.toggleSharing = toggleSharing;
         window.addPersonByCode = addPersonByCode; window.centerOnUser = centerOnUser;
         window.copyShareCode = copyShareCode;
+        window.toggleSatellite = toggleSatellite;
     </script>
 </body>
 </html>
