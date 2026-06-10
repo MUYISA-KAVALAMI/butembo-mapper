@@ -57,7 +57,7 @@ def init_db():
     
     # Table pour les positions
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_locations (
+        CREATE TABLE IF NOT EXISTS positions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER UNIQUE NOT NULL,
             latitude REAL NOT NULL,
@@ -276,6 +276,43 @@ def add_point():
     
     return jsonify({'id': point_id, 'message': 'Lieu ajouté avec succès'}), 201
 
+@app.route('/api/points/<int:point_id>', methods=['PUT'])
+@login_required
+def edit_point(point_id):
+    data = request.json
+    nom = data.get('nom')
+    categorie = data.get('categorie')
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+    adresse = data.get('adresse', '')
+    telephone = data.get('telephone', '')
+    website = data.get('website', '')
+    description = data.get('description', '')
+    
+    if not all([nom, categorie, latitude, longitude]):
+        return jsonify({'error': 'Nom, catégorie et coordonnées sont requis'}), 400
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM points WHERE id = ?', (point_id,))
+    existing = cursor.fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'error': 'Lieu introuvable'}), 404
+    
+    if existing['user_id'] != session['user_id'] and session.get('role') != 'admin':
+        conn.close()
+        return jsonify({'error': 'Action non autorisée'}), 403
+    
+    cursor.execute('''
+        UPDATE points
+        SET nom = ?, categorie = ?, latitude = ?, longitude = ?, adresse = ?, telephone = ?, website = ?, description = ?
+        WHERE id = ?
+    ''', (nom, categorie, latitude, longitude, adresse, telephone, website, description, point_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Lieu mis à jour'}), 200
+
 # Localisation
 @app.route('/api/update-location', methods=['POST'])
 @login_required
@@ -284,6 +321,9 @@ def update_location():
     latitude = data.get('latitude')
     longitude = data.get('longitude')
     mode = data.get('mode', 'person')
+    speed = data.get('speed', 0)
+    altitude = data.get('altitude', 0)
+    accuracy = data.get('accuracy', 0)
     is_sharing = data.get('is_sharing', 1)
     
     if latitude is None or longitude is None:
@@ -294,9 +334,9 @@ def update_location():
     
     cursor.execute('''
         INSERT OR REPLACE INTO user_locations 
-        (user_id, latitude, longitude, mode, is_sharing, last_update)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (session['user_id'], latitude, longitude, mode, is_sharing))
+        (user_id, latitude, longitude, speed, altitude, accuracy, mode, is_sharing, last_update)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (session['user_id'], latitude, longitude, speed, altitude, accuracy, mode, is_sharing))
     
     conn.commit()
     conn.close()
@@ -306,6 +346,9 @@ def update_location():
 @app.route('/api/active-users', methods=['GET'])
 @login_required
 def get_active_users():
+    if session.get('role') != 'admin':
+        return jsonify([]), 200
+
     conn = get_db()
     cursor = conn.cursor()
     

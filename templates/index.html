@@ -122,39 +122,57 @@
         .person-offline { color: #999; }
         
         .custom-marker { background: transparent; border: none; }
-        .marker-container { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+        .marker-container { display: flex; flex-direction: column; align-items: center; cursor: pointer; position: relative; }
         .marker-icon {
-            background: white;
+            background: transparent;
             border-radius: 50%;
-            width: 32px;
-            height: 32px;
+            width: 18px;
+            height: 18px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            border: 2px solid;
-            font-size: 16px;
+            box-shadow: none;
+            border: none;
+            font-size: 12px;
+            opacity: 0.85;
+            transition: opacity 0.15s ease;
+            position: relative;
+            z-index: 1;
         }
+        .marker-icon:hover { opacity: 1; }
         .marker-label {
-            background: rgba(0,0,0,0.7);
-            color: white;
-            font-size: 9px;
-            padding: 2px 5px;
+            background: transparent;
+            color: #333;
+            font-size: 8px;
+            padding: 0px 4px;
             border-radius: 4px;
-            margin-top: 2px;
             white-space: nowrap;
+            opacity: 0.9;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 600;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            transition: color 0.3s ease;
         }
+        .marker-label.satellite { color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
         
         .user-location-marker {
-            width: 16px;
-            height: 16px;
-            background: #4c9aff;
+            width: 12px;
+            height: 12px;
+            background: rgba(76,154,255,0.9);
             border-radius: 50%;
-            border: 2px solid white;
-            box-shadow: 0 0 0 2px #4c9aff;
+            border: 1.5px solid rgba(255,255,255,0.85);
+            box-shadow: 0 0 0 4px rgba(76,154,255,0.08);
             animation: pulse 1.5s ease-out infinite;
+            opacity: 0.95;
         }
-        .other-user-marker { font-size: 28px; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.3)); }
+        .other-user-marker { font-size: 16px; filter: drop-shadow(0px 1px 1px rgba(0,0,0,0.12)); opacity: 0.85; }
         
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(76, 154, 255, 0.7); }
@@ -218,10 +236,21 @@
     
     <!-- Panneau de partage -->
     <div class="floating-panel" id="sharePanel">
-        <h6><i class="fas fa-share-alt"></i> Partager ma position</h6>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0"><i class="fas fa-share-alt"></i> Partager ma position</h6>
+            <button class="btn btn-sm btn-outline-secondary" onclick="closePanels()">Fermer</button>
+        </div>
         <div class="form-check form-switch mb-2">
             <input class="form-check-input" type="checkbox" id="sharingToggle" onchange="toggleSharing()">
             <label class="form-check-label" id="sharingLabel">Partage désactivé</label>
+        </div>
+        <div class="mb-2">
+            <label class="form-label small">Mode de localisation</label>
+            <select id="modeSelect" class="form-select" onchange="updateMode()">
+                <option value="person">Personne</option>
+                <option value="car">Véhicule</option>
+                <option value="motorcycle">Moto</option>
+            </select>
         </div>
         <div id="shareCodeSection" style="display:none;">
             <p class="small text-muted mb-1">Votre code unique (valable 1h):</p>
@@ -233,7 +262,10 @@
     
     <!-- Panneau des personnes -->
     <div class="floating-panel" id="peoplePanel">
-        <h6><i class="fas fa-users"></i> Personnes à proximité</h6>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0"><i class="fas fa-users"></i> Personnes à proximité</h6>
+            <button class="btn btn-sm btn-outline-secondary" onclick="closePanels()">Fermer</button>
+        </div>
         <div class="mb-2">
             <input type="text" id="searchPersonInput" class="form-control form-control-sm" placeholder="Code ou nom...">
             <button class="btn btn-sm btn-primary w-100 mt-1" onclick="addPersonByCode()">Ajouter par code</button>
@@ -256,6 +288,7 @@
                 </div>
                 <div class="modal-body">
                     <form id="addForm">
+                        <input type="hidden" id="pointId">
                         <div class="mb-2">
                             <label class="form-label small">Nom du lieu *</label>
                             <input type="text" id="nom" class="form-control" required>
@@ -277,6 +310,18 @@
                         <div class="mb-2">
                             <label class="form-label small">Adresse</label>
                             <input type="text" id="adresse" class="form-control">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Téléphone</label>
+                            <input type="text" id="telephone" class="form-control" placeholder="Ex : +243 123 456 789">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Site web</label>
+                            <input type="text" id="website" class="form-control" placeholder="https://...">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Description</label>
+                            <textarea id="description" class="form-control" rows="3" placeholder="Courte description"></textarea>
                         </div>
                         <div class="alert alert-info small py-1 mb-2">
                             <i class="fas fa-info-circle"></i> Cliquez sur la carte pour placer le marqueur
@@ -305,7 +350,9 @@
         let isSharing = false, locationUpdateInterval = null;
         let otherUsersMarkers = {};
         let activeUsers = [];
+        let sharedUsers = [];
         let shareCode = null;
+        let currentMode = 'person';
         
         const BUTEMBO = [0.1211, 29.2883];
         
@@ -354,27 +401,34 @@
                 currentTileLayer.addTo(map);
             }
             
+            const labels = document.querySelectorAll('.marker-label');
+            
             if (isSatellite) {
                 map.removeLayer(currentTileLayer);
                 currentTileLayer = mapStyles.standard;
                 currentTileLayer.addTo(map);
                 isSatellite = false;
+                labels.forEach(label => label.classList.remove('satellite'));
                 showAlert('Vue standard', 'info');
             } else {
                 map.removeLayer(currentTileLayer);
                 currentTileLayer = mapStyles.satellite;
                 currentTileLayer.addTo(map);
                 isSatellite = true;
+                labels.forEach(label => label.classList.add('satellite'));
                 showAlert('Vue satellite 🛰️', 'success');
             }
         }
         
         function createMarkerFromPoint(point) {
             const iconData = icons[point.categorie] || icons.default;
-            const html = `<div class="marker-container"><div class="marker-icon" style="border-color: ${iconData.color};">${iconData.emoji}</div><div class="marker-label">${point.nom.length > 12 ? point.nom.substring(0, 10) + '…' : point.nom}</div></div>`;
-            const customIcon = L.divIcon({ html: html, className: 'custom-marker', iconSize: [32, 45], popupAnchor: [0, -18] });
+            const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.id === point.user_id);
+            const editButton = canEdit ? `<button class="btn btn-sm btn-warning mt-2 w-100" onclick="map.closePopup();openEditModal(${point.id})">Modifier</button>` : '';
+            const html = `<div class="marker-container"><div class="marker-icon" style="border-color: ${iconData.color};">${iconData.emoji}</div><div class="marker-label">${point.nom}</div></div>`;
+            const customIcon = L.divIcon({ html: html, className: 'custom-marker', iconSize: [22, 30], popupAnchor: [0, -12] });
             const marker = L.marker([point.latitude, point.longitude], { icon: customIcon });
-            marker.bindPopup(`<strong>${point.nom}</strong><br>${point.adresse || ''}<br><button class="btn btn-sm btn-primary mt-2" onclick="showDirections(${point.latitude}, ${point.longitude})">Itinéraire</button>`);
+            marker.pointData = point;
+            marker.bindPopup(`<strong>${point.nom}</strong><br>${point.adresse || ''}<br>${editButton}<button class="btn btn-sm btn-primary mt-2 w-100" onclick="showDirections(${point.latitude}, ${point.longitude})">Itinéraire</button><button class="btn btn-sm btn-secondary mt-2 w-100" onclick="map.closePopup()">Fermer</button>`);
             return marker;
         }
         
@@ -391,6 +445,7 @@
                 });
             } catch(e) { console.error(e); }
         }
+
         
         // Localisation
         function toggleLocation() {
@@ -410,10 +465,15 @@
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     
+                    const iconHtml = currentMode === 'car' ? '🚗' : currentMode === 'motorcycle' ? '🏍️' : '<div class="user-location-marker"></div>';
+                    const iconOptions = currentMode === 'person'
+                        ? { html: '<div class="user-location-marker"></div>', className: 'user-marker', iconSize: [16, 16], iconAnchor: [8, 8] }
+                        : { html: `<div class="marker-icon" style="border-color: #4c9aff;">${iconHtml}</div>`, className: 'custom-marker', iconSize: [22, 22], iconAnchor: [11, 11] };
+                    
                     if (currentPositionMarker) {
                         currentPositionMarker.setLatLng([lat, lng]);
                     } else {
-                        const userIcon = L.divIcon({ html: '<div class="user-location-marker"></div>', className: 'user-marker', iconSize: [16, 16], iconAnchor: [8, 8] });
+                        const userIcon = L.divIcon(iconOptions);
                         currentPositionMarker = L.marker([lat, lng], { icon: userIcon }).bindPopup('Vous êtes ici').addTo(map);
                     }
                     map.setView([lat, lng], 16);
@@ -449,7 +509,7 @@
                     body: JSON.stringify({
                         latitude: lat,
                         longitude: lng,
-                        mode: 'person',
+                        mode: currentMode,
                         speed: speed,
                         altitude: altitude,
                         accuracy: accuracy,
@@ -470,7 +530,7 @@
             isSharing = toggle.checked;
             
             if (isSharing) {
-                label.innerHTML = 'Partage activé ✅';
+                label.innerHTML = `Partage activé (${currentMode === 'car' ? 'véhicule' : currentMode === 'motorcycle' ? 'moto' : 'personne'}) ✅`;
                 label.style.color = '#22c55e';
                 generateShareCode();
                 document.getElementById('shareCodeSection').style.display = 'block';
@@ -509,9 +569,14 @@
         // Localiser d'autres personnes
         async function loadActiveUsers() {
             try {
-                const response = await fetch('/api/active-users');
-                const users = await response.json();
-                activeUsers = users;
+                if (currentUser && currentUser.role === 'admin') {
+                    const response = await fetch('/api/active-users');
+                    const users = await response.json();
+                    activeUsers = users;
+                } else {
+                    await refreshSharedUsers();
+                    activeUsers = sharedUsers;
+                }
                 updateUsersOnMap();
                 updatePeopleList();
             } catch(e) { console.error(e); }
@@ -524,15 +589,15 @@
             activeUsers.forEach(user => {
                 const iconHtml = modeIcons[user.mode] || '🚶';
                 const customIcon = L.divIcon({
-                    html: `<div style="font-size: 28px; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.3));">${iconHtml}</div>`,
+                    html: `<div style="font-size: 18px; filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.25));">${iconHtml}</div>`,
                     className: 'other-user-marker',
-                    iconSize: [28, 28],
-                    popupAnchor: [0, -14]
+                    iconSize: [20, 20],
+                    popupAnchor: [0, -10]
                 });
                 
                 const marker = L.marker([user.latitude, user.longitude], { icon: customIcon });
                 const lastUpdate = new Date(user.last_update).toLocaleTimeString();
-                marker.bindPopup(`<strong>${user.username}</strong><br>${iconHtml} Dernière mise à jour: ${lastUpdate}`);
+                marker.bindPopup(`<strong>${user.username}</strong><br>${iconHtml} Dernière mise à jour: ${lastUpdate}<br><button class="btn btn-sm btn-secondary mt-2 w-100" onclick="map.closePopup()">Fermer</button>`);
                 marker.addTo(map);
                 otherUsersMarkers[user.id] = marker;
             });
@@ -541,13 +606,16 @@
         function updatePeopleList() {
             const container = document.getElementById('peopleList');
             if (activeUsers.length === 0) {
-                container.innerHTML = '<div class="text-muted text-center small">Aucune personne à proximité</div>';
+                const message = currentUser && currentUser.role === 'admin'
+                    ? 'Aucune personne à proximité'
+                    : 'Ajoutez un code pour localiser un utilisateur';
+                container.innerHTML = `<div class="text-muted text-center small">${message}</div>`;
                 return;
             }
             
             container.innerHTML = activeUsers.map(user => `
-                <div class="person-item" onclick="centerOnUser(${user.id}, ${user.latitude}, ${user.longitude})">
-                    <div style="font-size: 24px;">${modeIcons[user.mode] || '🚶'}</div>
+                <div class="person-item" onclick="centerOnUser(${user.user_id || user.id}, ${user.latitude}, ${user.longitude})">
+                    <div style="font-size: 20px;">${modeIcons[user.mode] || '🚶'}</div>
                     <div class="flex-grow-1">
                         <strong>${user.username}</strong>
                         <div class="small person-online">🟢 En ligne</div>
@@ -565,10 +633,11 @@
                 const response = await fetch(`/api/share-code-location/${code}`);
                 if (response.ok) {
                     const user = await response.json();
+                    user.code = code;
+                    addSharedUser(user);
                     showAlert(`${user.username} ajouté(e) !`, 'success');
                     centerOnUser(user.user_id, user.latitude, user.longitude);
                     document.getElementById('searchPersonInput').value = '';
-                    loadActiveUsers();
                 } else {
                     const error = await response.json();
                     showAlert(error.error, 'danger');
@@ -580,6 +649,36 @@
             map.setView([lat, lng], 16);
             if (otherUsersMarkers[userId]) {
                 otherUsersMarkers[userId].openPopup();
+            }
+        }
+        
+        function addSharedUser(user) {
+            const existing = sharedUsers.find(u => u.user_id === user.user_id);
+            if (!existing) {
+                sharedUsers.push(user);
+            } else {
+                Object.assign(existing, user);
+            }
+            activeUsers = sharedUsers;
+            updateUsersOnMap();
+            updatePeopleList();
+        }
+        
+        async function refreshSharedUsers() {
+            if (!sharedUsers.length) return;
+            const updated = [];
+            for (const user of sharedUsers) {
+                try {
+                    const response = await fetch(`/api/share-code-location/${user.code}`);
+                    if (response.ok) {
+                        const refreshed = await response.json();
+                        refreshed.code = user.code;
+                        updated.push(refreshed);
+                    }
+                } catch(e) { console.error('Impossible de rafraîchir le code', user.code, e); }
+            }
+            if (updated.length) {
+                sharedUsers = updated;
             }
         }
         
@@ -596,34 +695,44 @@
         }
         
         function onMapClick(e) {
-            if (currentUser) {
-                if (window.tempMarker) map.removeLayer(window.tempMarker);
-                window.tempMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
-                document.getElementById('latitude').value = e.latlng.lat.toFixed(6);
-                document.getElementById('longitude').value = e.latlng.lng.toFixed(6);
-            }
+            if (!currentUser) return;
+            if (window.tempMarker) map.removeLayer(window.tempMarker);
+            window.tempMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+            document.getElementById('latitude').value = e.latlng.lat.toFixed(6);
+            document.getElementById('longitude').value = e.latlng.lng.toFixed(6);
         }
         
         async function submitPoint() {
             if (!currentUser) return;
+            const pointId = document.getElementById('pointId').value;
             const data = {
                 nom: document.getElementById('nom').value,
                 categorie: document.getElementById('categorie').value,
+                adresse: document.getElementById('adresse').value || '',
+                telephone: document.getElementById('telephone')?.value || '',
+                website: document.getElementById('website')?.value || '',
+                description: document.getElementById('description')?.value || '',
                 latitude: parseFloat(document.getElementById('latitude').value),
-                longitude: parseFloat(document.getElementById('longitude').value),
-                adresse: document.getElementById('adresse').value,
-                telephone: document.getElementById('telephone').value,
-                description: document.getElementById('description').value
+                longitude: parseFloat(document.getElementById('longitude').value)
             };
-            if (!data.nom || !data.categorie || !data.latitude || !data.longitude) { showAlert('Champs obligatoires', 'warning'); return; }
+            if (!data.nom || !data.categorie || !data.latitude || !data.longitude) {
+                showAlert('Champs obligatoires', 'warning');
+                return;
+            }
             try {
-                const response = await fetch('/api/points', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                const url = pointId ? `/api/points/${pointId}` : '/api/points';
+                const method = pointId ? 'PUT' : 'POST';
+                const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
                 if (response.ok) {
-                    showAlert('Lieu ajouté!', 'success');
+                    showAlert(pointId ? 'Lieu mis à jour!' : 'Lieu ajouté!', 'success');
                     document.getElementById('addForm').reset();
+                    document.getElementById('pointId').value = '';
                     if (window.tempMarker) map.removeLayer(window.tempMarker);
                     bootstrap.Modal.getInstance(document.getElementById('addModal'))?.hide();
                     loadPoints();
+                } else {
+                    const result = await response.json();
+                    showAlert(result.error || (pointId ? 'Échec de la mise à jour' : 'Échec de l’ajout'), 'danger');
                 }
             } catch(e) { showAlert('Erreur', 'danger'); }
         }
@@ -659,6 +768,11 @@
             document.getElementById('sharePanel').classList.remove('active');
         }
         
+        function closePanels() {
+            document.getElementById('sharePanel').classList.remove('active');
+            document.getElementById('peoplePanel').classList.remove('active');
+        }
+        
         function zoomIn() { map.zoomIn(); }
         function zoomOut() { map.zoomOut(); }
         
@@ -673,6 +787,22 @@
             } else { nav.innerHTML = `<a href="/login" class="btn btn-sm btn-primary">Connexion</a>`; }
         }
         
+        function updateMode() {
+            currentMode = document.getElementById('modeSelect').value;
+            showAlert(`Mode de localisation : ${currentMode === 'car' ? 'Véhicule' : currentMode === 'motorcycle' ? 'Moto' : 'Personne'}`, 'info');
+            if (currentPositionMarker) {
+                const iconHtml = currentMode === 'car' ? '🚗' : currentMode === 'motorcycle' ? '🏍️' : '<div class="user-location-marker"></div>';
+                const iconOptions = currentMode === 'person'
+                    ? { html: '<div class="user-location-marker"></div>', className: 'user-marker', iconSize: [16, 16], iconAnchor: [8, 8] }
+                    : { html: `<div class="marker-icon" style="border-color: #4c9aff;">${iconHtml}</div>`, className: 'custom-marker', iconSize: [22, 22], iconAnchor: [11, 11] };
+                currentPositionMarker.setIcon(L.divIcon(iconOptions));
+            }
+            if (isSharing && currentPositionMarker) {
+                const pos = currentPositionMarker.getLatLng();
+                updateServerLocation(pos.lat, pos.lng, 0, 0, 0);
+            }
+        }
+        
         async function logout() {
             if (watchId) stopLocationTracking();
             await fetch('/api/logout', { method: 'POST' });
@@ -682,7 +812,33 @@
             location.reload();
         }
         
-        function openAddModal() { if (!currentUser) { window.location.href = '/login'; return; } new bootstrap.Modal(document.getElementById('addModal')).show(); }
+        function openAddModal() {
+            if (!currentUser) { window.location.href = '/login'; return; }
+            document.getElementById('addForm').reset();
+            document.getElementById('pointId').value = '';
+            document.querySelector('#addModal .modal-title').innerHTML = '<i class="fas fa-plus-circle"></i> Ajouter un lieu';
+            new bootstrap.Modal(document.getElementById('addModal')).show();
+        }
+
+        function openEditModal(pointId) {
+            if (!currentUser) { window.location.href = '/login'; return; }
+            const marker = markers[pointId];
+            if (!marker) { showAlert('Point introuvable', 'warning'); return; }
+            const point = marker.pointData || marker.options?.pointData;
+            if (!point) { showAlert('Point introuvable', 'warning'); return; }
+            document.getElementById('pointId').value = point.id;
+            document.getElementById('nom').value = point.nom;
+            document.getElementById('categorie').value = point.categorie;
+            document.getElementById('adresse').value = point.adresse || '';
+            document.getElementById('telephone').value = point.telephone || '';
+            document.getElementById('website').value = point.website || '';
+            document.getElementById('description').value = point.description || '';
+            document.getElementById('latitude').value = point.latitude;
+            document.getElementById('longitude').value = point.longitude;
+            document.querySelector('#addModal .modal-title').innerHTML = '<i class="fas fa-edit"></i> Modifier un lieu';
+            new bootstrap.Modal(document.getElementById('addModal')).show();
+        }
+
         function showAlert(msg, type) { const c = document.getElementById('alertContainer'); if (!c) return; const a = document.createElement('div'); a.className = `alert-custom alert-${type}`; a.innerHTML = msg; c.appendChild(a); setTimeout(() => a.remove(), 3000); }
         
         document.addEventListener('click', e => { if (!e.target.closest('.search-container')) document.getElementById('searchResults').style.display = 'none'; });
@@ -690,7 +846,7 @@
         updateNav();
         initMap();
         
-        window.submitPoint = submitPoint; window.logout = logout; window.openAddModal = openAddModal;
+        window.submitPoint = submitPoint; window.logout = logout; window.openAddModal = openAddModal; window.openEditModal = openEditModal;
         window.searchLocation = searchLocation; window.goToLocation = goToLocation;
         window.zoomIn = zoomIn; window.zoomOut = zoomOut; window.showDirections = showDirections;
         window.toggleLocation = toggleLocation; window.toggleSharePanel = toggleSharePanel;
