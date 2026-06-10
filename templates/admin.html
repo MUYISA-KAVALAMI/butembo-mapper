@@ -154,7 +154,22 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ role })
             });
-            if (response.ok) showAlert('Rôle mis à jour', 'success');
+            if (response.ok) {
+                showAlert('Rôle mis à jour', 'success');
+                loadUsers();
+            }
+        }
+
+        async function deleteUser(userId) {
+            if (!confirm('Supprimer cet utilisateur ?')) return;
+            const response = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+            if (response.ok) {
+                showAlert('Utilisateur supprimé', 'success');
+                loadUsers();
+            } else {
+                const result = await response.json();
+                showAlert(result.error || 'Impossible de supprimer l’utilisateur', 'danger');
+            }
         }
         
         function showSection(section) {

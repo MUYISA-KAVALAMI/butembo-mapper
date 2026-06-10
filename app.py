@@ -313,6 +313,24 @@ def edit_point(point_id):
     conn.close()
     return jsonify({'message': 'Lieu mis à jour'}), 200
 
+@app.route('/api/points/<int:point_id>', methods=['DELETE'])
+@login_required
+def delete_point(point_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM points WHERE id = ?', (point_id,))
+    existing = cursor.fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'error': 'Lieu introuvable'}), 404
+    if existing['user_id'] != session['user_id'] and session.get('role') != 'admin':
+        conn.close()
+        return jsonify({'error': 'Action non autorisée'}), 403
+    cursor.execute('DELETE FROM points WHERE id = ?', (point_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Lieu supprimé'}), 200
+
 # Localisation
 @app.route('/api/update-location', methods=['POST'])
 @login_required
@@ -481,6 +499,22 @@ def update_user_role(user_id):
     conn.close()
     
     return jsonify({'message': 'Rôle mis à jour'}), 200
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def delete_user(user_id):
+    if user_id == session['user_id']:
+        return jsonify({'error': 'Impossible de supprimer votre propre compte'}), 400
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM users WHERE id = ?', (user_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Utilisateur supprimé'}), 200
 
 # ============ LANCEMENT ============
 if __name__ == '__main__':

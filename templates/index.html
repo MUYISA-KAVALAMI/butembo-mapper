@@ -51,6 +51,8 @@
         .control-btn:hover { background: #f0f0f0; transform: scale(1.02); }
         .control-btn.active { background: #4c9aff; color: white; }
         .control-btn.sharing { background: #22c55e; color: white; animation: pulse-green 2s infinite; }
+        .control-btn.add-mode-active { background: #16a34a; color: white; box-shadow: 0 0 0 2px #22c55e, 0 0 0 4px rgba(34,197,94,0.3); }
+        .control-btn.satellite-active { background: #1e3a5f; color: white; }
         
         @keyframes pulse-green {
             0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
@@ -79,7 +81,6 @@
         .search-box input { flex: 1; border: none; outline: none; font-size: 14px; }
         .search-box button { background: none; border: none; color: #4c9aff; cursor: pointer; }
         
-        /* Panels */
         .floating-panel {
             position: absolute;
             bottom: 80px;
@@ -119,7 +120,6 @@
         }
         .person-item:hover { background: #f5f5f5; }
         .person-online { color: #22c55e; }
-        .person-offline { color: #999; }
         
         .custom-marker { background: transparent; border: none; }
         .marker-container { display: flex; flex-direction: column; align-items: center; cursor: pointer; position: relative; }
@@ -160,7 +160,21 @@
             transition: color 0.3s ease;
         }
         .marker-label.satellite { color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
-
+        
+        .temp-marker {
+            filter: drop-shadow(0 0 4px rgba(34,197,94,0.8));
+            animation: bounce 0.5s ease;
+        }
+        
+        .edit-temp-marker {
+            filter: drop-shadow(0 0 4px rgba(59,130,246,0.8));
+            animation: bounce 0.5s ease;
+        }
+        
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
         
         .user-location-marker {
             width: 12px;
@@ -172,7 +186,6 @@
             animation: pulse 1.5s ease-out infinite;
             opacity: 0.95;
         }
-        .other-user-marker { font-size: 16px; filter: drop-shadow(0px 1px 1px rgba(0,0,0,0.12)); opacity: 0.85; }
         
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(76, 154, 255, 0.7); }
@@ -205,6 +218,30 @@
             .control-btn { width: 44px; height: 44px; font-size: 18px; }
             .floating-panel { width: 260px; right: 10px; }
         }
+        
+        .add-mode-cursor, .edit-mode-cursor {
+            cursor: crosshair !important;
+        }
+        .add-mode-cursor *, .edit-mode-cursor * {
+            cursor: crosshair !important;
+        }
+        
+        .modal {
+            pointer-events: none;
+        }
+        .modal-dialog {
+            pointer-events: auto;
+        }
+        .modal-backdrop {
+            pointer-events: none;
+            background-color: rgba(0,0,0,0.3);
+        }
+        
+        .coord-indicator {
+            font-family: monospace;
+            font-size: 11px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -228,13 +265,12 @@
         <button class="control-btn" onclick="zoomIn()">+</button>
         <button class="control-btn" onclick="zoomOut()">−</button>
         <button class="control-btn" id="locationBtn" onclick="toggleLocation()">📍</button>
-        <button class="control-btn" onclick="toggleSatellite()" style="background:#4c9aff;color:white;">🛰️</button>
+        <button class="control-btn" id="satelliteBtn" onclick="toggleSatellite()">🛰️</button>
         <button class="control-btn" id="shareBtn" onclick="toggleSharePanel()" style="background:#8b5cf6;color:white;">🔗</button>
         <button class="control-btn" id="peopleBtn" onclick="togglePeoplePanel()" style="background:#ec489a;color:white;">👥</button>
-        <button class="control-btn" onclick="openAddModal()" style="background:#22c55e;color:white;">+</button>
+        <button class="control-btn" id="addBtn" onclick="enableAddMode()" style="background:#22c55e;color:white;">+</button>
     </div>
     
-    <!-- Panneau de partage -->
     <div class="floating-panel" id="sharePanel">
         <div class="d-flex justify-content-between align-items-center mb-2">
             <h6 class="mb-0"><i class="fas fa-share-alt"></i> Partager ma position</h6>
@@ -260,7 +296,6 @@
         </div>
     </div>
     
-    <!-- Panneau des personnes -->
     <div class="floating-panel" id="peoplePanel">
         <div class="d-flex justify-content-between align-items-center mb-2">
             <h6 class="mb-0"><i class="fas fa-users"></i> Personnes à proximité</h6>
@@ -278,16 +313,16 @@
     <div id="map"></div>
     <div id="alertContainer"></div>
     
-    <!-- Modal Ajout lieu -->
-    <div class="modal fade" id="addModal" tabindex="-1">
+    <!-- Modal unique pour l'ajout et la modification -->
+    <div class="modal fade" id="addModal" tabindex="-1" data-bs-backdrop="false" data-bs-keyboard="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header bg-primary text-white">
+                <div class="modal-header" id="modalHeader">
                     <h5 class="modal-title"><i class="fas fa-plus-circle"></i> Ajouter un lieu</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="disableAllModes()"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="addForm">
+                    <form id="addForm" onsubmit="event.preventDefault(); submitPoint();">
                         <input type="hidden" id="pointId">
                         <div class="mb-2">
                             <label class="form-label small">Nom du lieu *</label>
@@ -321,19 +356,31 @@
                         </div>
                         <div class="mb-2">
                             <label class="form-label small">Description</label>
-                            <textarea id="description" class="form-control" rows="3" placeholder="Courte description"></textarea>
+                            <textarea id="description" class="form-control" rows="2" placeholder="Courte description"></textarea>
                         </div>
-                        <div class="alert alert-info small py-1 mb-2">
-                            <i class="fas fa-info-circle"></i> Cliquez sur la carte pour placer le marqueur
+                        
+                        <!-- Zone de sélection des coordonnées -->
+                        <div class="alert alert-primary small py-2 mb-2" id="coordModeAlert">
+                            <i class="fas fa-map-marker-alt"></i> <strong>Cliquez sur la carte</strong> pour sélectionner ou modifier la position
                         </div>
+                        
                         <div class="row">
-                            <div class="col-6"><input type="text" id="latitude" class="form-control" placeholder="Latitude" readonly></div>
-                            <div class="col-6"><input type="text" id="longitude" class="form-control" placeholder="Longitude" readonly></div>
+                            <div class="col-6">
+                                <label class="form-label small">Latitude *</label>
+                                <input type="text" id="latitude" class="form-control" placeholder="Cliquez sur la carte" readonly required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">Longitude *</label>
+                                <input type="text" id="longitude" class="form-control" placeholder="Cliquez sur la carte" readonly required>
+                            </div>
+                        </div>
+                        <div class="text-center mt-1">
+                            <small class="coord-indicator" id="coordStatus">⚠️ Aucune position sélectionnée</small>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal" onclick="disableAllModes()">Annuler</button>
                     <button class="btn btn-primary" onclick="submitPoint()">Enregistrer</button>
                 </div>
             </div>
@@ -344,17 +391,42 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <script>
-        // Configuration
         let map, markers = {}, currentUser = null;
         let watchId = null, currentPositionMarker = null;
-        let isSharing = false, locationUpdateInterval = null;
+        let isSharing = false;
         let otherUsersMarkers = {};
         let activeUsers = [];
         let sharedUsers = [];
         let shareCode = null;
         let currentMode = 'person';
         
+        // Variables pour les modes d'ajout/modification
+        let addModeEnabled = false;
+        let editModeEnabled = false;
+        let tempMarker = null;
+        let currentEditingPointId = null;
+        let addModal = null;
+        let currentLayer = null;
+        let isSatelliteMode = false;
+        
         const BUTEMBO = [0.1211, 29.2883];
+        
+        // Sources de tuiles
+        const tileLayers = {
+            standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 19
+            }),
+            satellite1: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© Esri',
+                maxZoom: 18
+            }),
+            satellite2: L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+                attribution: '© Google',
+                maxZoom: 20
+            })
+        };
         
         const icons = {
             ecole: { emoji: '🏫', color: '#22c55e' },
@@ -370,66 +442,286 @@
         
         const modeIcons = { person: '🚶', car: '🚗', motorcycle: '🏍️' };
         
-        // ============ STYLES DE CARTE (AJOUTÉ POUR SATELLITE) ============
-        const mapStyles = {
-            standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap'
-            }),
-            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '© Esri'
-            })
-        };
-        let currentTileLayer = null;
-        let isSatellite = false;
-        
-        // Initialisation
         function initMap() {
-            map = L.map('map').setView(BUTEMBO, 14);
-            // Initialiser avec le fond standard
-            currentTileLayer = mapStyles.standard;
-            currentTileLayer.addTo(map);
+            map = L.map('map', {
+                zoomControl: false,
+                maxZoom: 20,
+                minZoom: 3
+            }).setView(BUTEMBO, 14);
+            
+            currentLayer = tileLayers.standard;
+            currentLayer.addTo(map);
+            
+            // Événement de clic sur la carte (gère ajout et modification)
             map.on('click', onMapClick);
+            
             loadPoints();
             loadActiveUsers();
             setInterval(loadActiveUsers, 5000);
         }
         
-        // ============ FONCTION SATELLITE ============
-        function toggleSatellite() {
-            if (!currentTileLayer) {
-                currentTileLayer = mapStyles.standard;
-                currentTileLayer.addTo(map);
+        // Gestionnaire de clic sur la carte
+        function onMapClick(e) {
+            if (addModeEnabled) {
+                // Mode AJOUT
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                updateCoordinates(lat, lng);
+                showTempMarker(lat, lng, 'add');
+                showAlert(`📍 Position pour le nouveau lieu : ${lat.toFixed(4)}, ${lng.toFixed(4)}`, 'success');
+            } 
+            else if (editModeEnabled) {
+                // Mode MODIFICATION
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                updateCoordinates(lat, lng);
+                showTempMarker(lat, lng, 'edit');
+                showAlert(`✏️ Position modifiée : ${lat.toFixed(4)}, ${lng.toFixed(4)}`, 'success');
+            }
+        }
+        
+        // Mettre à jour les champs de coordonnées
+        function updateCoordinates(lat, lng) {
+            document.getElementById('latitude').value = lat.toFixed(6);
+            document.getElementById('longitude').value = lng.toFixed(6);
+            document.getElementById('latitude').style.backgroundColor = '#e8f5e9';
+            document.getElementById('longitude').style.backgroundColor = '#e8f5e9';
+            document.getElementById('coordStatus').innerHTML = `✅ Position: ${lat.toFixed(4)}°, ${lng.toFixed(4)}°`;
+            document.getElementById('coordStatus').style.color = '#22c55e';
+        }
+        
+        // Afficher un marqueur temporaire
+        function showTempMarker(lat, lng, mode) {
+            if (tempMarker) {
+                map.removeLayer(tempMarker);
             }
             
-            const labels = document.querySelectorAll('.marker-label');
+            const markerClass = mode === 'edit' ? 'edit-temp-marker' : 'temp-marker';
+            const iconHtml = mode === 'edit' 
+                ? '<div style="font-size: 28px; filter: drop-shadow(0 0 4px rgba(59,130,246,0.8));">📌</div>'
+                : '<div style="font-size: 28px; filter: drop-shadow(0 0 4px rgba(34,197,94,0.8));">📍</div>';
             
-            if (isSatellite) {
-                map.removeLayer(currentTileLayer);
-                currentTileLayer = mapStyles.standard;
-                currentTileLayer.addTo(map);
-                isSatellite = false;
-                labels.forEach(label => label.classList.remove('satellite'));
+            tempMarker = L.marker([lat, lng], {
+                draggable: true,
+                icon: L.divIcon({
+                    html: iconHtml,
+                    className: markerClass,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 28]
+                })
+            }).addTo(map);
+            
+            tempMarker.on('dragend', function() {
+                const newPos = tempMarker.getLatLng();
+                updateCoordinates(newPos.lat, newPos.lng);
+                showAlert('Position ajustée !', 'info');
+            });
+            
+            const popupText = mode === 'edit' 
+                ? `<div class="text-center"><strong>✏️ Position modifiée</strong><br>Lat: ${lat.toFixed(6)}<br>Lng: ${lng.toFixed(6)}<br><button class="btn btn-sm btn-primary mt-2" onclick="document.getElementById('addForm').scrollIntoView({behavior:'smooth'});">✅ Valider la modification</button></div>`
+                : `<div class="text-center"><strong>📍 Nouvelle position</strong><br>Lat: ${lat.toFixed(6)}<br>Lng: ${lng.toFixed(6)}<br><button class="btn btn-sm btn-success mt-2" onclick="document.getElementById('addForm').scrollIntoView({behavior:'smooth'});">✅ Valider l'ajout</button></div>`;
+            
+            tempMarker.bindPopup(popupText).openPopup();
+        }
+        
+        // Activer le mode AJOUT
+        function enableAddMode() {
+            if (!currentUser) {
+                window.location.href = '/login';
+                return;
+            }
+            
+            // Désactiver le mode édition si actif
+            disableEditMode();
+            
+            if (!addModal) {
+                addModal = new bootstrap.Modal(document.getElementById('addModal'));
+            }
+            
+            // Réinitialiser le formulaire
+            document.getElementById('addForm').reset();
+            document.getElementById('pointId').value = '';
+            document.getElementById('latitude').value = '';
+            document.getElementById('longitude').value = '';
+            document.getElementById('latitude').style.backgroundColor = '';
+            document.getElementById('longitude').style.backgroundColor = '';
+            document.getElementById('coordStatus').innerHTML = '⚠️ Cliquez sur la carte pour sélectionner une position';
+            document.getElementById('coordStatus').style.color = '#f59e0b';
+            
+            // Supprimer l'ancien marqueur
+            if (tempMarker) {
+                map.removeLayer(tempMarker);
+                tempMarker = null;
+            }
+            
+            // Activer le mode ajout
+            addModeEnabled = true;
+            editModeEnabled = false;
+            currentEditingPointId = null;
+            
+            // Changer le curseur
+            document.getElementById('map').classList.add('add-mode-cursor');
+            document.getElementById('map').classList.remove('edit-mode-cursor');
+            
+            // Changer le style du bouton
+            const addBtn = document.getElementById('addBtn');
+            addBtn.classList.add('add-mode-active');
+            addBtn.style.background = '#16a34a';
+            
+            // Configurer le modal pour l'ajout
+            document.getElementById('modalHeader').className = 'modal-header bg-success text-white';
+            document.querySelector('#addModal .modal-title').innerHTML = '<i class="fas fa-plus-circle"></i> Ajouter un lieu';
+            document.getElementById('coordModeAlert').innerHTML = '<i class="fas fa-map-marker-alt"></i> <strong>Mode ajout activé !</strong> Cliquez sur la carte pour placer le marqueur';
+            document.getElementById('coordModeAlert').className = 'alert alert-success small py-2 mb-2';
+            
+            showAlert('🟢 Mode AJOUT activé ! Cliquez sur la carte pour placer votre point', 'success');
+            
+            addModal.show();
+        }
+        
+        // Activer le mode MODIFICATION
+        function enableEditMode(pointId, lat, lng) {
+            if (!currentUser) {
+                window.location.href = '/login';
+                return;
+            }
+            
+            // Désactiver le mode ajout si actif
+            disableAddMode();
+            
+            if (!addModal) {
+                addModal = new bootstrap.Modal(document.getElementById('addModal'));
+            }
+            
+            // Supprimer l'ancien marqueur
+            if (tempMarker) {
+                map.removeLayer(tempMarker);
+                tempMarker = null;
+            }
+            
+            // Activer le mode édition
+            addModeEnabled = false;
+            editModeEnabled = true;
+            currentEditingPointId = pointId;
+            
+            // Mettre à jour les coordonnées
+            updateCoordinates(lat, lng);
+            showTempMarker(lat, lng, 'edit');
+            
+            // Changer le curseur
+            document.getElementById('map').classList.add('edit-mode-cursor');
+            document.getElementById('map').classList.remove('add-mode-cursor');
+            
+            // Configurer le modal pour la modification
+            document.getElementById('modalHeader').className = 'modal-header bg-primary text-white';
+            document.querySelector('#addModal .modal-title').innerHTML = '<i class="fas fa-edit"></i> Modifier un lieu';
+            document.getElementById('coordModeAlert').innerHTML = '<i class="fas fa-map-marker-alt"></i> <strong>Mode modification activé !</strong> Cliquez sur la carte pour déplacer le point';
+            document.getElementById('coordModeAlert').className = 'alert alert-primary small py-2 mb-2';
+            
+            showAlert('🔵 Mode MODIFICATION activé ! Cliquez sur la carte pour déplacer le point', 'success');
+        }
+        
+        // Désactiver le mode ajout
+        function disableAddMode() {
+            addModeEnabled = false;
+            document.getElementById('map').classList.remove('add-mode-cursor');
+            
+            const addBtn = document.getElementById('addBtn');
+            addBtn.classList.remove('add-mode-active');
+            addBtn.style.background = '#22c55e';
+        }
+        
+        // Désactiver le mode édition
+        function disableEditMode() {
+            editModeEnabled = false;
+            document.getElementById('map').classList.remove('edit-mode-cursor');
+        }
+        
+        // Désactiver tous les modes
+        function disableAllModes() {
+            disableAddMode();
+            disableEditMode();
+            if (tempMarker) {
+                map.removeLayer(tempMarker);
+                tempMarker = null;
+            }
+            currentEditingPointId = null;
+        }
+        
+        function toggleSatellite() {
+            const btn = document.getElementById('satelliteBtn');
+            
+            if (isSatelliteMode) {
+                map.removeLayer(currentLayer);
+                currentLayer = tileLayers.standard;
+                currentLayer.addTo(map);
+                isSatelliteMode = false;
+                btn.classList.remove('satellite-active');
+                btn.style.background = '';
+                btn.style.color = '';
+                
+                document.querySelectorAll('.marker-label').forEach(label => {
+                    label.classList.remove('satellite');
+                });
+                
                 showAlert('Vue standard', 'info');
             } else {
-                map.removeLayer(currentTileLayer);
-                currentTileLayer = mapStyles.satellite;
-                currentTileLayer.addTo(map);
-                isSatellite = true;
-                labels.forEach(label => label.classList.add('satellite'));
-                showAlert('Vue satellite 🛰️', 'success');
+                showAlert('Chargement de la vue satellite...', 'info');
+                
+                map.removeLayer(currentLayer);
+                currentLayer = tileLayers.satellite2;
+                currentLayer.addTo(map);
+                
+                let tileError = false;
+                currentLayer.on('tileerror', function() {
+                    if (!tileError) {
+                        tileError = true;
+                        map.removeLayer(currentLayer);
+                        currentLayer = tileLayers.satellite1;
+                        currentLayer.addTo(map);
+                        
+                        currentLayer.on('tileerror', function() {
+                            map.removeLayer(currentLayer);
+                            currentLayer = tileLayers.standard;
+                            currentLayer.addTo(map);
+                            isSatelliteMode = false;
+                            btn.classList.remove('satellite-active');
+                            showAlert('Service satellite indisponible, retour en mode standard', 'warning');
+                        });
+                    }
+                });
+                
+                isSatelliteMode = true;
+                btn.classList.add('satellite-active');
+                btn.style.background = '#1e3a5f';
+                btn.style.color = 'white';
+                
+                document.querySelectorAll('.marker-label').forEach(label => {
+                    label.classList.add('satellite');
+                });
+                
+                showAlert('🛰️ Vue satellite activée', 'success');
             }
         }
         
         function createMarkerFromPoint(point) {
             const iconData = icons[point.categorie] || icons.default;
             const canEdit = currentUser && (currentUser.role === 'admin' || currentUser.id === point.user_id);
-            const editButton = canEdit ? `<button class="btn btn-sm btn-warning mt-2 w-100" onclick="map.closePopup();openEditModal(${point.id})">Modifier</button>` : '';
-            const html = `<div class="marker-container"><div class="marker-icon" style="border-color: ${iconData.color};">${iconData.emoji}</div><div class="marker-label">${point.nom}</div></div>`;
+            const editButton = canEdit ? `<button class="btn btn-sm btn-warning mt-2 w-100" onclick="map.closePopup();openEditModal(${point.id})">✏️ Modifier</button>` : '';
+            const satelliteClass = isSatelliteMode ? 'satellite' : '';
+            const html = `<div class="marker-container"><div class="marker-icon" style="border-color: ${iconData.color};">${iconData.emoji}</div><div class="marker-label ${satelliteClass}">${escapeHtml(point.nom)}</div></div>`;
             const customIcon = L.divIcon({ html: html, className: 'custom-marker', iconSize: [22, 30], popupAnchor: [0, -12] });
             const marker = L.marker([point.latitude, point.longitude], { icon: customIcon });
             marker.pointData = point;
-            marker.bindPopup(`<strong>${point.nom}</strong><br>${point.adresse || ''}<br>${editButton}<button class="btn btn-sm btn-primary mt-2 w-100" onclick="showDirections(${point.latitude}, ${point.longitude})">Itinéraire</button><button class="btn btn-sm btn-secondary mt-2 w-100" onclick="map.closePopup()">Fermer</button>`);
+            marker.bindPopup(`<strong>${escapeHtml(point.nom)}</strong><br>${escapeHtml(point.adresse || '')}<br>${editButton}<button class="btn btn-sm btn-primary mt-2 w-100" onclick="showDirections(${point.latitude}, ${point.longitude})">🗺️ Itinéraire</button><button class="btn btn-sm btn-secondary mt-2 w-100" onclick="map.closePopup()">Fermer</button>`);
             return marker;
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
         
         async function loadPoints() {
@@ -445,9 +737,7 @@
                 });
             } catch(e) { console.error(e); }
         }
-
         
-        // Localisation
         function toggleLocation() {
             if (!currentUser) { showAlert('Connectez-vous d\'abord', 'warning'); return; }
             if (watchId) {
@@ -465,10 +755,9 @@
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     
-                    const iconHtml = currentMode === 'car' ? '🚗' : currentMode === 'motorcycle' ? '🏍️' : '<div class="user-location-marker"></div>';
                     const iconOptions = currentMode === 'person'
                         ? { html: '<div class="user-location-marker"></div>', className: 'user-marker', iconSize: [16, 16], iconAnchor: [8, 8] }
-                        : { html: `<div class="marker-icon" style="border-color: #4c9aff;">${iconHtml}</div>`, className: 'custom-marker', iconSize: [22, 22], iconAnchor: [11, 11] };
+                        : { html: `<div class="marker-icon" style="border-color: #4c9aff; font-size: 20px;">${modeIcons[currentMode]}</div>`, className: 'custom-marker', iconSize: [24, 24], iconAnchor: [12, 12] };
                     
                     if (currentPositionMarker) {
                         currentPositionMarker.setLatLng([lat, lng]);
@@ -494,7 +783,11 @@
         function stopLocationTracking() {
             if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
             if (currentPositionMarker) { map.removeLayer(currentPositionMarker); currentPositionMarker = null; }
-            if (isSharing) { toggleSharing(); }
+            if (isSharing) { 
+                const toggle = document.getElementById('sharingToggle');
+                if (toggle.checked) toggle.checked = false;
+                toggleSharing();
+            }
             
             document.getElementById('locationBtn').style.background = 'white';
             document.getElementById('locationBtn').style.color = '#2c3e50';
@@ -519,7 +812,6 @@
             } catch(e) { console.error('Erreur mise à jour position', e); }
         }
         
-        // Partage
         function toggleSharing() {
             const toggle = document.getElementById('sharingToggle');
             const label = document.getElementById('sharingLabel');
@@ -552,7 +844,6 @@
             shareCode = data.code;
             document.getElementById('shareCode').innerHTML = shareCode;
             
-            // Générer QR Code
             document.getElementById('qrcode').innerHTML = '';
             new QRCode(document.getElementById('qrcode'), {
                 text: shareCode,
@@ -566,7 +857,6 @@
             showAlert('Code copié !', 'success');
         }
         
-        // Localiser d'autres personnes
         async function loadActiveUsers() {
             try {
                 if (currentUser && currentUser.role === 'admin') {
@@ -587,25 +877,27 @@
             otherUsersMarkers = {};
             
             activeUsers.forEach(user => {
+                if (user.user_id === currentUser?.id) return;
                 const iconHtml = modeIcons[user.mode] || '🚶';
                 const customIcon = L.divIcon({
-                    html: `<div style="font-size: 18px; filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.25));">${iconHtml}</div>`,
+                    html: `<div style="font-size: 20px; filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.25));">${iconHtml}</div>`,
                     className: 'other-user-marker',
-                    iconSize: [20, 20],
-                    popupAnchor: [0, -10]
+                    iconSize: [24, 24],
+                    popupAnchor: [0, -12]
                 });
                 
                 const marker = L.marker([user.latitude, user.longitude], { icon: customIcon });
                 const lastUpdate = new Date(user.last_update).toLocaleTimeString();
-                marker.bindPopup(`<strong>${user.username}</strong><br>${iconHtml} Dernière mise à jour: ${lastUpdate}<br><button class="btn btn-sm btn-secondary mt-2 w-100" onclick="map.closePopup()">Fermer</button>`);
+                marker.bindPopup(`<strong>${escapeHtml(user.username)}</strong><br>${iconHtml} Dernière mise à jour: ${lastUpdate}<br><button class="btn btn-sm btn-secondary mt-2 w-100" onclick="map.closePopup()">Fermer</button>`);
                 marker.addTo(map);
-                otherUsersMarkers[user.id] = marker;
+                otherUsersMarkers[user.user_id || user.id] = marker;
             });
         }
         
         function updatePeopleList() {
             const container = document.getElementById('peopleList');
-            if (activeUsers.length === 0) {
+            const filteredUsers = activeUsers.filter(u => u.user_id !== currentUser?.id);
+            if (filteredUsers.length === 0) {
                 const message = currentUser && currentUser.role === 'admin'
                     ? 'Aucune personne à proximité'
                     : 'Ajoutez un code pour localiser un utilisateur';
@@ -613,11 +905,11 @@
                 return;
             }
             
-            container.innerHTML = activeUsers.map(user => `
+            container.innerHTML = filteredUsers.map(user => `
                 <div class="person-item" onclick="centerOnUser(${user.user_id || user.id}, ${user.latitude}, ${user.longitude})">
                     <div style="font-size: 20px;">${modeIcons[user.mode] || '🚶'}</div>
                     <div class="flex-grow-1">
-                        <strong>${user.username}</strong>
+                        <strong>${escapeHtml(user.username)}</strong>
                         <div class="small person-online">🟢 En ligne</div>
                     </div>
                     <div class="small text-muted">${new Date(user.last_update).toLocaleTimeString()}</div>
@@ -682,7 +974,6 @@
             }
         }
         
-        // Utilitaires
         function showDirections(lat, lng) {
             if (currentPositionMarker) {
                 const start = currentPositionMarker.getLatLng();
@@ -694,17 +985,21 @@
             }
         }
         
-        function onMapClick(e) {
-            if (!currentUser) return;
-            if (window.tempMarker) map.removeLayer(window.tempMarker);
-            window.tempMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
-            document.getElementById('latitude').value = e.latlng.lat.toFixed(6);
-            document.getElementById('longitude').value = e.latlng.lng.toFixed(6);
-        }
-        
         async function submitPoint() {
-            if (!currentUser) return;
+            if (!currentUser) {
+                showAlert('Veuillez vous connecter', 'warning');
+                return;
+            }
+            
             const pointId = document.getElementById('pointId').value;
+            const lat = document.getElementById('latitude').value;
+            const lng = document.getElementById('longitude').value;
+            
+            if (!lat || !lng) {
+                showAlert('Veuillez d\'abord cliquer sur la carte pour sélectionner une position', 'warning');
+                return;
+            }
+            
             const data = {
                 nom: document.getElementById('nom').value,
                 categorie: document.getElementById('categorie').value,
@@ -712,29 +1007,45 @@
                 telephone: document.getElementById('telephone')?.value || '',
                 website: document.getElementById('website')?.value || '',
                 description: document.getElementById('description')?.value || '',
-                latitude: parseFloat(document.getElementById('latitude').value),
-                longitude: parseFloat(document.getElementById('longitude').value)
+                latitude: parseFloat(lat),
+                longitude: parseFloat(lng)
             };
-            if (!data.nom || !data.categorie || !data.latitude || !data.longitude) {
-                showAlert('Champs obligatoires', 'warning');
+            
+            if (!data.nom || !data.categorie) {
+                showAlert('Le nom et la catégorie sont obligatoires', 'warning');
                 return;
             }
+            
             try {
                 const url = pointId ? `/api/points/${pointId}` : '/api/points';
                 const method = pointId ? 'PUT' : 'POST';
-                const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+                const response = await fetch(url, { 
+                    method, 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify(data) 
+                });
+                
                 if (response.ok) {
-                    showAlert(pointId ? 'Lieu mis à jour!' : 'Lieu ajouté!', 'success');
+                    showAlert(pointId ? 'Lieu mis à jour avec succès!' : 'Lieu ajouté avec succès!', 'success');
                     document.getElementById('addForm').reset();
                     document.getElementById('pointId').value = '';
-                    if (window.tempMarker) map.removeLayer(window.tempMarker);
-                    bootstrap.Modal.getInstance(document.getElementById('addModal'))?.hide();
+                    
+                    if (tempMarker) {
+                        map.removeLayer(tempMarker);
+                        tempMarker = null;
+                    }
+                    
+                    disableAllModes();
+                    addModal.hide();
                     loadPoints();
                 } else {
                     const result = await response.json();
-                    showAlert(result.error || (pointId ? 'Échec de la mise à jour' : 'Échec de l’ajout'), 'danger');
+                    showAlert(result.error || (pointId ? 'Échec de la mise à jour' : 'Échec de l\'ajout'), 'danger');
                 }
-            } catch(e) { showAlert('Erreur', 'danger'); }
+            } catch(e) { 
+                showAlert('Erreur réseau', 'danger');
+                console.error(e);
+            }
         }
         
         async function searchLocation() {
@@ -745,7 +1056,7 @@
                 const results = await resp.json();
                 const div = document.getElementById('searchResults');
                 if (results.length) {
-                    div.innerHTML = results.map(r => `<div style="padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;" onclick="goToLocation(${r.lat}, ${r.lon}, '${r.display_name.replace(/'/g, "\\'")}')"><strong>${r.display_name.split(',')[0]}</strong><br><small>${r.display_name}</small></div>`).join('');
+                    div.innerHTML = results.map(r => `<div style="padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;" onclick="goToLocation(${r.lat}, ${r.lon}, '${r.display_name.replace(/'/g, "\\'")}')"><strong>${escapeHtml(r.display_name.split(',')[0])}</strong><br><small>${escapeHtml(r.display_name)}</small></div>`).join('');
                     div.style.display = 'block';
                 } else { div.style.display = 'none'; showAlert('Aucun résultat', 'warning'); }
             } catch(e) { console.error(e); }
@@ -776,14 +1087,16 @@
         function zoomIn() { map.zoomIn(); }
         function zoomOut() { map.zoomOut(); }
         
-        // Utilisateur
         function getCurrentUser() { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; }
         
         function updateNav() {
             currentUser = getCurrentUser();
             const nav = document.getElementById('userNav');
             if (currentUser) {
-                nav.innerHTML = `<div class="dropdown"><button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="fas fa-user-circle"></i> ${currentUser.username}</button><ul class="dropdown-menu dropdown-menu-end">${currentUser.role === 'admin' ? '<li><a class="dropdown-item" href="/admin">Admin</a></li><li><hr></li>' : ''}<li><a class="dropdown-item" href="#" onclick="logout()">Déconnexion</a></li></ul></div>`;
+                const adminButton = currentUser.role === 'admin'
+                    ? '<a href="/admin" class="btn btn-sm btn-outline-danger me-2">Admin</a>'
+                    : '';
+                nav.innerHTML = `${adminButton}<div class="dropdown"><button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="fas fa-user-circle"></i> ${escapeHtml(currentUser.username)}</button><ul class="dropdown-menu dropdown-menu-end">${currentUser.role === 'admin' ? '<li><a class="dropdown-item" href="/admin">Admin</a></li><li><hr></li>' : ''}<li><a class="dropdown-item" href="#" onclick="logout()">Déconnexion</a></li></ul></div>`;
             } else { nav.innerHTML = `<a href="/login" class="btn btn-sm btn-primary">Connexion</a>`; }
         }
         
@@ -791,10 +1104,9 @@
             currentMode = document.getElementById('modeSelect').value;
             showAlert(`Mode de localisation : ${currentMode === 'car' ? 'Véhicule' : currentMode === 'motorcycle' ? 'Moto' : 'Personne'}`, 'info');
             if (currentPositionMarker) {
-                const iconHtml = currentMode === 'car' ? '🚗' : currentMode === 'motorcycle' ? '🏍️' : '<div class="user-location-marker"></div>';
                 const iconOptions = currentMode === 'person'
                     ? { html: '<div class="user-location-marker"></div>', className: 'user-marker', iconSize: [16, 16], iconAnchor: [8, 8] }
-                    : { html: `<div class="marker-icon" style="border-color: #4c9aff;">${iconHtml}</div>`, className: 'custom-marker', iconSize: [22, 22], iconAnchor: [11, 11] };
+                    : { html: `<div class="marker-icon" style="border-color: #4c9aff; font-size: 20px;">${modeIcons[currentMode]}</div>`, className: 'custom-marker', iconSize: [24, 24], iconAnchor: [12, 12] };
                 currentPositionMarker.setIcon(L.divIcon(iconOptions));
             }
             if (isSharing && currentPositionMarker) {
@@ -812,20 +1124,21 @@
             location.reload();
         }
         
-        function openAddModal() {
-            if (!currentUser) { window.location.href = '/login'; return; }
-            document.getElementById('addForm').reset();
-            document.getElementById('pointId').value = '';
-            document.querySelector('#addModal .modal-title').innerHTML = '<i class="fas fa-plus-circle"></i> Ajouter un lieu';
-            new bootstrap.Modal(document.getElementById('addModal')).show();
-        }
-
         function openEditModal(pointId) {
-            if (!currentUser) { window.location.href = '/login'; return; }
+            if (!currentUser) { 
+                window.location.href = '/login'; 
+                return; 
+            }
+            
             const marker = markers[pointId];
-            if (!marker) { showAlert('Point introuvable', 'warning'); return; }
-            const point = marker.pointData || marker.options?.pointData;
-            if (!point) { showAlert('Point introuvable', 'warning'); return; }
+            if (!marker || !marker.pointData) { 
+                showAlert('Point introuvable', 'warning'); 
+                return; 
+            }
+            
+            const point = marker.pointData;
+            
+            // Remplir le formulaire avec les données existantes
             document.getElementById('pointId').value = point.id;
             document.getElementById('nom').value = point.nom;
             document.getElementById('categorie').value = point.categorie;
@@ -833,27 +1146,63 @@
             document.getElementById('telephone').value = point.telephone || '';
             document.getElementById('website').value = point.website || '';
             document.getElementById('description').value = point.description || '';
-            document.getElementById('latitude').value = point.latitude;
-            document.getElementById('longitude').value = point.longitude;
-            document.querySelector('#addModal .modal-title').innerHTML = '<i class="fas fa-edit"></i> Modifier un lieu';
-            new bootstrap.Modal(document.getElementById('addModal')).show();
+            
+            // Activer le mode édition avec les coordonnées existantes
+            enableEditMode(pointId, point.latitude, point.longitude);
+            
+            // Ouvrir le modal
+            if (!addModal) {
+                addModal = new bootstrap.Modal(document.getElementById('addModal'));
+            }
+            addModal.show();
         }
-
-        function showAlert(msg, type) { const c = document.getElementById('alertContainer'); if (!c) return; const a = document.createElement('div'); a.className = `alert-custom alert-${type}`; a.innerHTML = msg; c.appendChild(a); setTimeout(() => a.remove(), 3000); }
         
-        document.addEventListener('click', e => { if (!e.target.closest('.search-container')) document.getElementById('searchResults').style.display = 'none'; });
+        function showAlert(msg, type) { 
+            const c = document.getElementById('alertContainer'); 
+            if (!c) return; 
+            const a = document.createElement('div'); 
+            a.className = `alert-custom alert-${type}`; 
+            a.innerHTML = msg; 
+            c.appendChild(a); 
+            setTimeout(() => a.remove(), 3000); 
+        }
+        
+        // Fermeture du modal
+        document.getElementById('addModal').addEventListener('hidden.bs.modal', function () {
+            disableAllModes();
+            if (tempMarker) {
+                map.removeLayer(tempMarker);
+                tempMarker = null;
+            }
+        });
+        
+        document.addEventListener('click', e => { 
+            if (!e.target.closest('.search-container')) 
+                document.getElementById('searchResults').style.display = 'none'; 
+        });
         
         updateNav();
         initMap();
         
-        window.submitPoint = submitPoint; window.logout = logout; window.openAddModal = openAddModal; window.openEditModal = openEditModal;
-        window.searchLocation = searchLocation; window.goToLocation = goToLocation;
-        window.zoomIn = zoomIn; window.zoomOut = zoomOut; window.showDirections = showDirections;
-        window.toggleLocation = toggleLocation; window.toggleSharePanel = toggleSharePanel;
-        window.togglePeoplePanel = togglePeoplePanel; window.toggleSharing = toggleSharing;
-        window.addPersonByCode = addPersonByCode; window.centerOnUser = centerOnUser;
+        // Exporter les fonctions globales
+        window.submitPoint = submitPoint; 
+        window.logout = logout; 
+        window.enableAddMode = enableAddMode;
+        window.openEditModal = openEditModal;
+        window.searchLocation = searchLocation; 
+        window.goToLocation = goToLocation;
+        window.zoomIn = zoomIn; 
+        window.zoomOut = zoomOut; 
+        window.showDirections = showDirections;
+        window.toggleLocation = toggleLocation; 
+        window.toggleSharePanel = toggleSharePanel;
+        window.togglePeoplePanel = togglePeoplePanel; 
+        window.toggleSharing = toggleSharing;
+        window.addPersonByCode = addPersonByCode; 
+        window.centerOnUser = centerOnUser;
         window.copyShareCode = copyShareCode;
         window.toggleSatellite = toggleSatellite;
+        window.disableAllModes = disableAllModes;
     </script>
 </body>
 </html>
